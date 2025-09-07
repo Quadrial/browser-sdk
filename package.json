@@ -1,0 +1,96 @@
+{
+  "name": "@xmtp/browser-sdk",
+  "version": "4.1.0",
+  "description": "XMTP client SDK for browsers written in TypeScript",
+  "keywords": [
+    "xmtp",
+    "messaging",
+    "web3",
+    "sdk",
+    "js",
+    "ts",
+    "javascript",
+    "typescript"
+  ],
+  "homepage": "https://github.com/xmtp/xmtp-js",
+  "bugs": {
+    "url": "https://github.com/xmtp/xmtp-js/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/xmtp/xmtp-js.git",
+    "directory": "sdks/browser-sdk"
+  },
+  "license": "MIT",
+  "author": "XMTP Labs <eng@xmtp.com>",
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "npm run clean:dist && npx rollup -c",
+    "clean": "rm -rf .turbo && rm -rf node_modules && npm run clean:dist",
+    "clean:dist": "rm -rf dist",
+    "dev": "npm run clean:dist && npx rollup -c --watch",
+    "test": "vitest run",
+    "test:debug": "vitest run --inspect-brk --no-file-parallelism",
+    "typecheck": "tsc"
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 3 chrome versions",
+      "last 3 firefox versions",
+      "last 3 safari versions"
+    ]
+  },
+  "dependencies": {
+    "@xmtp/content-type-group-updated": "^2.0.2",
+    "@xmtp/content-type-primitives": "^2.0.2",
+    "@xmtp/content-type-text": "^2.0.2",
+    "@xmtp/wasm-bindings": "1.4.0",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "@rollup/plugin-terser": "^0.4.4",
+    "@rollup/plugin-typescript": "^12.1.4",
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@types/uuid": "^10.0.0",
+    "@vitest/browser": "^3.2.4",
+    "@vitest/coverage-v8": "^3.2.4",
+    "@web/rollup-plugin-copy": "^0.5.1",
+    "playwright": "^1.54.1",
+    "rollup": "^4.45.0",
+    "rollup-plugin-dts": "^6.2.1",
+    "rollup-plugin-tsconfig-paths": "^1.5.2",
+    "typescript": "^5.8.3",
+    "viem": "^2.31.7",
+    "vite": "^7.0.4",
+    "vite-tsconfig-paths": "^5.1.4",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "registry": "https://registry.npmjs.org/"
+  }
+}

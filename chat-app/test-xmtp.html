@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>XMTP Test</title>
+  </head>
+  <body>
+    <h1>XMTP Client Test</h1>
+    <button id="testBtn">Test XMTP Client</button>
+    <div id="output"></div>
+
+    <script type="module">
+      import { Client } from "@xmtp/browser-sdk";
+
+      const output = document.getElementById("output");
+      const testBtn = document.getElementById("testBtn");
+
+      function log(message) {
+        console.log(message);
+        output.innerHTML += "<p>" + message + "</p>";
+      }
+
+      testBtn.addEventListener("click", async () => {
+        try {
+          log("Testing XMTP client initialization...");
+
+          // Create a mock signer for testing
+          const mockSigner = {
+            type: "EOA",
+            getIdentifier: async () => {
+              return {
+                identifier: "0x1234567890123456789012345678901234567890",
+                identifierKind: "Ethereum",
+              };
+            },
+            signMessage: async (message) => {
+              log("Mock signer: " + message);
+              return new Uint8Array(65); // Mock signature
+            },
+          };
+
+          log("Created mock signer");
+
+          // Try to create client
+          const client = await Client.create(mockSigner, {
+            env: "production",
+            disableAutoRegister: true,
+            loggingLevel: "debug",
+            dbPath: null,
+          });
+
+          log("✅ XMTP client created successfully!");
+          log("Client: " + JSON.stringify(client, null, 2));
+        } catch (error) {
+          log("❌ Error: " + error.message);
+          log("Stack: " + error.stack);
+        }
+      });
+    </script>
+  </body>
+</html>
