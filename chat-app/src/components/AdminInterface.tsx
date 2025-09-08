@@ -18,6 +18,43 @@ interface ConversationData {
   lastMessage?: DecodedMessage;
 }
 
+// Helper function to safely render message content
+const renderMessageContent = (content: any): string => {
+  if (typeof content === "function") {
+    try {
+      // Execute function if it's a content encoder
+      return content();
+    } catch (e) {
+      console.error("Error rendering message content function:", e);
+      return "[Error rendering content]";
+    }
+  } else if (typeof content === "string") {
+    return content;
+  } else if (typeof content === "object" && content !== null) {
+    // For objects that aren't functions or strings, stringify them
+    // This handles metadata or other non-standard message payloads
+    return JSON.stringify(content);
+  }
+  // Fallback for any other unexpected types
+  return String(content);
+};
+
+// Helper to check if an item is a DecodedMessage
+const isDecodedMessage = (item: any): item is DecodedMessage => {
+  return (
+    item &&
+    typeof item === "object" &&
+    "id" in item &&
+    "senderInboxId" in item &&
+    "sentAtNs" in item &&
+    "content" in item &&
+    "conversation" in item && // Essential for DecodedMessage
+    item.conversation &&
+    typeof item.conversation === "object" &&
+    "id" in item.conversation // Ensure conversation property is valid
+  );
+};
+
 function AdminInterface({ client }: AdminInterfaceProps) {
   const [conversations, setConversations] = useState<
     Map<string, ConversationData>
@@ -41,10 +78,11 @@ function AdminInterface({ client }: AdminInterfaceProps) {
         for (const conv of allConversations) {
           if (conv instanceof Dm) {
             const userAddress = await conv.peerInboxId();
-            const messages = await conv.messages();
+            // Filter messages to ensure only DecodedMessage are loaded
+            const messages = (await conv.messages()).filter(isDecodedMessage);
             const lastMessage = messages[messages.length - 1];
 
-            conversationMap.set(userAddress, {
+            conversationMap.set(conv.id, {
               dm: conv,
               messages,
               userAddress,
@@ -63,60 +101,219 @@ function AdminInterface({ client }: AdminInterfaceProps) {
     loadConversations();
   }, [client]);
 
-  // Listen for new messages in all conversations
+  // Listen for new conversations and messages in REAL-TIME
   useEffect(() => {
     if (!client) return;
 
-    const listenForMessages = async () => {
+    let isMounted = true;
+    const cleaners: (() => void)[] = [];
+
+    const setup = async () => {
       try {
-        const stream = await client.conversations.stream();
+        const allConversations = await client.conversations.list();
+        for (const conv of allConversations) {
+          if (!(conv instanceof Dm)) continue;
 
-        for await (const item of stream) {
-          // Check if this is a message (DecodedMessage) by checking for required properties
-          if (
-            item &&
-            typeof item === "object" &&
-            "conversationId" in item &&
-            "senderInboxId" in item &&
-            "content" in item
-          ) {
-            const message = item as unknown as DecodedMessage;
+          const userAddress = await conv.peerInboxId();
+          const initial = (await conv.messages()).filter(isDecodedMessage);
 
-            // Find the conversation this message belongs to
-            const conversation = conversations.get(message.senderInboxId);
-            if (conversation) {
+          // Add to state
+          setConversations((prev) => {
+            const newMap = new Map(prev);
+            newMap.set(conv.id, {
+              dm: conv,
+              messages: initial,
+              userAddress,
+              lastMessage: initial[initial.length - 1],
+            });
+            return newMap;
+          });
+
+          // Start streaming this conversation’s messages
+          const run = async () => {
+            const stream = await conv.streamMessages();
+            for await (const msg of stream) {
+              if (!isMounted) break;
+              if (!isDecodedMessage(msg)) continue;
+
               setConversations((prev) => {
                 const newMap = new Map(prev);
-                const existing = newMap.get(message.senderInboxId);
-
+                const existing = newMap.get(conv.id);
                 if (existing) {
-                  // Update existing conversation
-                  const updatedMessages = [...existing.messages, message];
-                  newMap.set(message.senderInboxId, {
-                    ...existing,
-                    messages: updatedMessages,
-                    lastMessage: message,
-                  });
+                  if (!existing.messages.some((m) => m.id === msg.id)) {
+                    newMap.set(conv.id, {
+                      ...existing,
+                      messages: [...existing.messages, msg],
+                      lastMessage: msg,
+                    });
+                  }
                 }
-
                 return newMap;
               });
             }
-          }
+          };
+          run();
+
+          // Cleaner to stop streaming when component unmounts
+          cleaners.push(() => conv.streamMessages().then((s) => s.return?.()));
         }
       } catch (err) {
-        console.error("Error listening for messages:", err);
-        setError("Error listening for messages");
+        console.error("AdminInterface error streaming messages:", err);
+        setError("Error streaming messages");
       }
     };
 
-    listenForMessages();
-  }, [client, conversations]);
+    setup();
 
-  // Auto-scroll to bottom when messages change
+    return () => {
+      isMounted = false;
+      cleaners.forEach((c) => c());
+    };
+  }, [client]);
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [selectedConversation, conversations]);
+    if (!client) return;
+
+    let isMounted = true;
+    const cleaners: (() => void)[] = [];
+
+    const setup = async () => {
+      try {
+        const allConversations = await client.conversations.list();
+        for (const conv of allConversations) {
+          if (!(conv instanceof Dm)) continue;
+
+          const userAddress = await conv.peerInboxId();
+          const initial = (await conv.messages()).filter(isDecodedMessage);
+
+          // Add to state
+          setConversations((prev) => {
+            const newMap = new Map(prev);
+            newMap.set(conv.id, {
+              dm: conv,
+              messages: initial,
+              userAddress,
+              lastMessage: initial[initial.length - 1],
+            });
+            return newMap;
+          });
+
+          // Start streaming this conversation’s messages
+          const run = async () => {
+            const stream = await conv.streamMessages();
+            for await (const msg of stream) {
+              if (!isMounted) break;
+              if (!isDecodedMessage(msg)) continue;
+
+              setConversations((prev) => {
+                const newMap = new Map(prev);
+                const existing = newMap.get(conv.id);
+                if (existing) {
+                  if (!existing.messages.some((m) => m.id === msg.id)) {
+                    newMap.set(conv.id, {
+                      ...existing,
+                      messages: [...existing.messages, msg],
+                      lastMessage: msg,
+                    });
+                  }
+                }
+                return newMap;
+              });
+            }
+          };
+          run();
+
+          // Cleaner to stop streaming when component unmounts
+          cleaners.push(() => conv.streamMessages().then((s) => s.return?.()));
+        }
+      } catch (err) {
+        console.error("AdminInterface error streaming messages:", err);
+        setError("Error streaming messages");
+      }
+    };
+
+    setup();
+
+    return () => {
+      isMounted = false;
+      cleaners.forEach((c) => c());
+    };
+  }, [client]);
+  useEffect(() => {
+    if (!client) return;
+
+    let isMounted = true;
+    const cleaners: (() => void)[] = [];
+
+    const setup = async () => {
+      try {
+        const allConversations = await client.conversations.list();
+        for (const conv of allConversations) {
+          if (!(conv instanceof Dm)) continue;
+
+          const userAddress = await conv.peerInboxId();
+          const initial = (await conv.messages()).filter(isDecodedMessage);
+
+          // Add to state
+          setConversations((prev) => {
+            const newMap = new Map(prev);
+            newMap.set(conv.id, {
+              dm: conv,
+              messages: initial,
+              userAddress,
+              lastMessage: initial[initial.length - 1],
+            });
+            return newMap;
+          });
+
+          // Start streaming this conversation’s messages
+          const run = async () => {
+            const stream = await conv.streamMessages();
+            for await (const msg of stream) {
+              if (!isMounted) break;
+              if (!isDecodedMessage(msg)) continue;
+
+              setConversations((prev) => {
+                const newMap = new Map(prev);
+                const existing = newMap.get(conv.id);
+                if (existing) {
+                  if (!existing.messages.some((m) => m.id === msg.id)) {
+                    newMap.set(conv.id, {
+                      ...existing,
+                      messages: [...existing.messages, msg],
+                      lastMessage: msg,
+                    });
+                  }
+                }
+                return newMap;
+              });
+            }
+          };
+          run();
+
+          // Cleaner to stop streaming when component unmounts
+          cleaners.push(() => conv.streamMessages().then((s) => s.return?.()));
+        }
+      } catch (err) {
+        console.error("AdminInterface error streaming messages:", err);
+        setError("Error streaming messages");
+      }
+    };
+
+    setup();
+
+    return () => {
+      isMounted = false;
+      cleaners.forEach((c) => c());
+    };
+  }, [client]);
+
+  // Auto-scroll to bottom when messages change for the selected conversation
+  useEffect(() => {
+    // Scroll only if there's a selected conversation and messages exist for it
+    if (selectedConversation && messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [conversations, selectedConversation]); // Depend on conversations and selectedConversation
 
   const createConversationWithUser = async () => {
     if (!newUserAddress.trim()) return;
@@ -129,12 +326,14 @@ function AdminInterface({ client }: AdminInterfaceProps) {
       };
 
       const dm = await client.conversations.newDmWithIdentifier(identifier);
-      const messages = await dm.messages();
+      // Load messages for the new conversation
+      const messages = (await dm.messages()).filter(isDecodedMessage);
       const userAddress = await dm.peerInboxId();
 
       setConversations((prev) => {
         const newMap = new Map(prev);
-        newMap.set(userAddress, {
+        newMap.set(dm.id, {
+          // Use conversation ID as key
           dm,
           messages,
           userAddress,
@@ -142,7 +341,7 @@ function AdminInterface({ client }: AdminInterfaceProps) {
         return newMap;
       });
 
-      setSelectedConversation(userAddress);
+      setSelectedConversation(dm.id);
       setNewUserAddress("");
     } catch (err) {
       console.error("Failed to create conversation:", err);
@@ -163,8 +362,10 @@ function AdminInterface({ client }: AdminInterfaceProps) {
       await conversation.dm.send(message);
       setMessage("");
 
-      // Refresh messages
-      const updatedMessages = await conversation.dm.messages();
+      // Refresh messages to show the sent message and update lastMessage
+      const updatedMessages = (await conversation.dm.messages()).filter(
+        isDecodedMessage
+      );
       setConversations((prev) => {
         const newMap = new Map(prev);
         const existing = newMap.get(selectedConversation);
@@ -187,7 +388,7 @@ function AdminInterface({ client }: AdminInterfaceProps) {
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
+      e.preventDefault(); // Prevent default newline on Enter
       sendMessage();
     }
   };
@@ -221,21 +422,25 @@ function AdminInterface({ client }: AdminInterfaceProps) {
         </div>
 
         <div className="flex-1 overflow-y-auto">
+          {/* Sort conversations by last message date */}
           {Array.from(conversations.values())
             .sort((a, b) => {
-              if (!a.lastMessage && !b.lastMessage) return 0;
-              if (!a.lastMessage) return 1;
-              if (!b.lastMessage) return -1;
-              return (
-                Number(b.lastMessage.sentAtNs) - Number(a.lastMessage.sentAtNs)
-              );
+              // Handle cases where lastMessage might be undefined
+              const timeA = a.lastMessage?.sentAtNs;
+              const timeB = b.lastMessage?.sentAtNs;
+
+              if (!timeA && !timeB) return 0;
+              if (!timeA) return 1; // a comes after b if a has no message
+              if (!timeB) return -1; // b comes after a if b has no message
+              // Sort by time descending (most recent first)
+              return Number(timeB) - Number(timeA);
             })
             .map((conv) => (
               <div
-                key={conv.userAddress}
-                onClick={() => setSelectedConversation(conv.userAddress)}
-                className={`p-3 border-b border-gray-700 cursor-pointer hover:bg-gray-700 ${
-                  selectedConversation === conv.userAddress ? "bg-gray-700" : ""
+                key={conv.dm.id}
+                onClick={() => setSelectedConversation(conv.dm.id)}
+                className={`p-3 border-b border-gray-700 cursor-pointer hover:bg-gray-700 transition-colors duration-150 ${
+                  selectedConversation === conv.dm.id ? "bg-gray-700" : ""
                 }`}
               >
                 <div className="font-medium text-sm">
@@ -243,9 +448,7 @@ function AdminInterface({ client }: AdminInterfaceProps) {
                 </div>
                 {conv.lastMessage && (
                   <div className="text-xs text-gray-400 mt-1 truncate">
-                    {typeof conv.lastMessage.content === "function"
-                      ? conv.lastMessage.content()
-                      : conv.lastMessage.content}
+                    {renderMessageContent(conv.lastMessage.content)}
                   </div>
                 )}
                 <div className="text-xs text-gray-500 mt-1">
@@ -261,7 +464,7 @@ function AdminInterface({ client }: AdminInterfaceProps) {
       <div className="flex-1 flex flex-col">
         {selectedConv ? (
           <>
-            <div className="p-4 border-b border-gray-700 bg-gray-800">
+            <div className="p-4 border-b border-gray-700 bg-gray-800 sticky top-0 z-10">
               <h3 className="font-semibold">
                 Chat with {selectedConv.userAddress.slice(0, 6)}...
                 {selectedConv.userAddress.slice(-4)}
@@ -269,28 +472,42 @@ function AdminInterface({ client }: AdminInterfaceProps) {
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {selectedConv.messages.map((msg) => (
+              {/* Render only valid DecodedMessages */}
+              {selectedConv.messages.filter(isDecodedMessage).map((msg) => (
                 <div
                   key={msg.id}
-                  className={`p-3 rounded-lg max-w-xs md:max-w-md lg:max-w-lg ${
+                  className={`flex items-start gap-3 ${
                     msg.senderInboxId === client?.inboxId
-                      ? "bg-blue-600 ml-auto"
-                      : "bg-gray-700 mr-auto"
+                      ? "flex-row-reverse"
+                      : ""
                   }`}
                 >
-                  <p className="text-sm text-gray-300 mb-1">
-                    {msg.senderInboxId === client?.inboxId ? "Admin" : "User"}
-                  </p>
-                  <p className="break-words">
-                    {typeof msg.content === "function"
-                      ? msg.content()
-                      : msg.content}
-                  </p>
-                  <p className="text-xs text-gray-400 mt-1">
-                    {new Date(
-                      Number(msg.sentAtNs / 1000000n)
-                    ).toLocaleTimeString()}
-                  </p>
+                  {/* Avatar placeholder or actual avatar if available */}
+                  <div className="w-10 h-10 rounded-full bg-gray-600 flex items-center justify-center text-xs font-bold uppercase flex-shrink-0">
+                    {msg.senderInboxId === client?.inboxId ? "A" : "U"}
+                  </div>
+                  <div
+                    className={`p-3 rounded-lg max-w-sm md:max-w-md lg:max-w-lg shadow-md ${
+                      msg.senderInboxId === client?.inboxId
+                        ? "bg-blue-600 text-white" // Admin message style
+                        : "bg-gray-700 text-gray-200" // User message style
+                    }`}
+                  >
+                    <p className="text-sm font-medium mb-1">
+                      {msg.senderInboxId === client?.inboxId ? "You" : "User"}
+                    </p>
+                    <p className="break-words text-sm leading-relaxed">
+                      {renderMessageContent(msg.content)}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-1 text-right">
+                      {new Date(
+                        Number(msg.sentAtNs / 1000000n)
+                      ).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </p>
+                  </div>
                 </div>
               ))}
               <div ref={messagesEndRef} />
@@ -302,21 +519,24 @@ function AdminInterface({ client }: AdminInterfaceProps) {
               </div>
             )}
 
-            <div className="p-4 border-t border-gray-700">
-              <div className="flex gap-2">
+            <div className="p-4 border-t border-gray-700 bg-gray-800">
+              <div className="flex gap-2 items-end">
+                {" "}
+                {/* Align items to bottom */}
                 <textarea
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
                   onKeyPress={handleKeyPress}
                   placeholder="Type your message..."
-                  className="flex-1 p-3 rounded-lg bg-gray-800 text-white resize-none border border-gray-600 focus:border-blue-500 focus:outline-none"
+                  className="flex-1 p-3 rounded-lg bg-gray-800 text-white resize-none border border-gray-600 focus:border-blue-500 focus:outline-none shadow-sm"
                   rows={2}
                   disabled={isSending}
+                  style={{ minHeight: "48px" }} // Match approximate height of a few lines
                 />
                 <button
                   onClick={sendMessage}
                   disabled={!message.trim() || isSending}
-                  className={`px-6 py-3 rounded-lg font-medium transition-colors ${
+                  className={`px-5 py-3 rounded-lg font-medium transition-colors shadow-sm flex-shrink-0 ${
                     !message.trim() || isSending
                       ? "bg-gray-600 cursor-not-allowed"
                       : "bg-blue-600 hover:bg-blue-700"
@@ -328,6 +548,7 @@ function AdminInterface({ client }: AdminInterfaceProps) {
             </div>
           </>
         ) : (
+          // Default view when no conversation is selected
           <div className="flex-1 flex items-center justify-center text-gray-400">
             <div className="text-center">
               <p className="text-lg mb-2">Select a conversation</p>
