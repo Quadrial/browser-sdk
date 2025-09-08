@@ -752,7 +752,7 @@ function AdminInterface({ client }: AdminInterfaceProps) {
       {/* Sidebar */}
       <div className="w-1/3 bg-gray-900 text-white flex flex-col border-r border-gray-700">
         <div className="p-4 border-b border-gray-700">
-          <h2 className="font-semibold mb-2">Admin Panel</h2>
+          <h2 className="font-semibold mb-2 text-amber-300">Admin Panel</h2>
           <div className="flex gap-2">
             <input
               value={newUserAddress}
