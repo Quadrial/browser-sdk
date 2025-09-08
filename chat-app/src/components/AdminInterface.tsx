@@ -752,7 +752,7 @@ function AdminInterface({ client }: AdminInterfaceProps) {
       {/* Sidebar */}
       <div className="w-1/3 bg-gray-900 text-white flex flex-col border-r border-gray-700">
         <div className="p-4 border-b border-gray-700">
-          <h2 className="font-semibold mb-2 text-amber-300">Admin Panel</h2>
+          <h2 className="font-semibold mb-2 text-blue-700">Admin Panel</h2>
           <div className="flex gap-2">
             <input
               value={newUserAddress}
@@ -797,7 +797,7 @@ function AdminInterface({ client }: AdminInterfaceProps) {
       </div>
 
       {/* Chat */}
-      <div className="flex-1 flex flex-col bg-gray-100">
+      <div className="flex-1 flex flex-col bg-gray-300">
         {selectedConv ? (
           <>
             <div className="p-4 border-b bg-white">
@@ -814,7 +814,7 @@ function AdminInterface({ client }: AdminInterfaceProps) {
                   >
                     <div
                       className={`px-3 py-2 rounded-lg max-w-[70%] ${
-                        mine ? "bg-blue-600 text-white" : "bg-white border"
+                        mine ? "bg-blue-600 text-white" : "bg-gray-600 border"
                       }`}
                     >
                       {renderMessageContent(msg.content)}
